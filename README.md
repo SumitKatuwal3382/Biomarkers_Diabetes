@@ -6,7 +6,7 @@
 
 ## Abstract
 
-Diabetic Retinopathy (DR) is a microvascular complication of diabetes mellitus and a leading cause of preventable blindness worldwide. Early molecular detection remains a critical unmet clinical need. This study presents a machine learning pipeline applied to high-dimensional gene expression data to: (1) identify statistically discriminative gene biomarkers that distinguish DR patients from healthy controls, and (2) evaluate the classification performance of multiple supervised learning models. Using a combined dataset of 195 patient samples and 9,432 gene features, we applied ANOVA-based feature selection, class imbalance correction via SMOTE, and compared seven classifiers — including baseline models and advanced approaches such as CatBoost, SVM with RBF kernel, Bayesian-optimized XGBoost, and a stacking ensemble. The baseline XGBoost model achieved the highest hold-out test accuracy of **84.62%**, while advanced models demonstrated stronger cross-validation generalization, with the Optuna-tuned XGBoost reaching **87.00% CV accuracy**. Key candidate biomarker genes identified include `PIEZO1`, `HIF1A-AS3`, `PLXNB2`, `RPS2P5`, and `RNF144B`.
+Diabetic Retinopathy (DR) is a microvascular complication of diabetes mellitus and a leading cause of preventable blindness worldwide. Early molecular detection remains a critical unmet clinical need. This study presents a machine learning pipeline applied to high-dimensional gene expression data to: (1) identify statistically discriminative gene biomarkers distinguishing DR patients from healthy controls, and (2) evaluate ten supervised learning classifiers using a comprehensive set of clinical metrics. Using 195 patient samples across 9,432 gene features, we applied ANOVA-based feature selection, SMOTE oversampling for class imbalance, and compared models including Logistic Regression, Random Forest, AdaBoost, SVM, LightGBM, CatBoost, Bayesian-optimized XGBoost and LightGBM, and a Stacking Ensemble. XGBoost (baseline) and LightGBM achieved the highest test accuracy of **84.62%**, while AdaBoost achieved the highest AUC of **0.883**. Optuna-tuned XGBoost reached the best cross-validation accuracy of **86.50%**. Key candidate biomarkers identified include `HIF1A-AS3`, `PIEZO1`, `RNF144B`, `CBL`, and `IRAK3`.
 
 ---
 
@@ -15,17 +15,11 @@ Diabetic Retinopathy (DR) is a microvascular complication of diabetes mellitus a
 1. [Background](#background)
 2. [Dataset](#dataset)
 3. [Methodology](#methodology)
-   - [Preprocessing](#1-preprocessing)
-   - [Feature Selection](#2-feature-selection--anova-f-test)
-   - [Class Imbalance Handling](#3-class-imbalance-handling--smote)
-   - [Baseline Models](#4-baseline-models)
-   - [Advanced Models](#5-advanced-models)
 4. [Results](#results)
-   - [Baseline Results](#baseline-model-results)
-   - [Advanced Results](#advanced-model-results)
-   - [Full Comparison](#full-model-comparison)
-   - [Per-Class Performance](#per-class-performance-advanced-models)
-5. [Candidate Biomarkers](#candidate-biomarker-genes)
+   - [Full Metrics Table](#full-metrics-table-all-10-models)
+   - [ROC Curves](#roc-curves)
+   - [Metrics Heatmap](#metrics-heatmap)
+5. [Candidate Biomarker Genes](#candidate-biomarker-genes)
 6. [Visualizations](#visualizations)
 7. [Discussion](#discussion)
 8. [Reproducibility](#reproducibility)
@@ -35,9 +29,7 @@ Diabetic Retinopathy (DR) is a microvascular complication of diabetes mellitus a
 
 ## Background
 
-Diabetic Retinopathy affects approximately one-third of all people with diabetes and is caused by progressive damage to the blood vessels of the retina. Clinical diagnosis relies on ophthalmoscopic imaging, which is expensive and requires specialist interpretation. Molecular biomarkers derived from gene expression profiling offer a complementary diagnostic route — one that could be implemented as a blood test and enable earlier, cheaper, and more scalable screening.
-
-Gene expression data is inherently high-dimensional (thousands of genes per patient) and biologically noisy, making it a challenging but important target for machine learning. The key tasks are: (1) dimensionality reduction to find the subset of genes most associated with disease status, and (2) building classifiers robust enough to generalize to unseen patients despite small sample sizes.
+Diabetic Retinopathy affects approximately one-third of all people with diabetes and is caused by progressive damage to the blood vessels of the retina. Clinical diagnosis relies on ophthalmoscopic imaging, which is expensive and requires specialist interpretation. Molecular biomarkers derived from gene expression profiling offer a complementary diagnostic route — one that could enable earlier, cheaper, and more scalable screening. Gene expression data is inherently high-dimensional and biologically noisy, making it a challenging target for machine learning.
 
 ---
 
@@ -52,281 +44,197 @@ Gene expression data is inherently high-dimensional (thousands of genes per pati
 | Class — Control (Healthy) | 70 samples (35.9%) |
 | Class imbalance ratio | ~1.79 : 1 (DR : Control) |
 
-The dataset is a combined expression matrix where each row is a patient sample and each column (except `Label`) is a gene. The `Label` column takes values `DR` or `Control`.
-
-**Note on class imbalance:** The dataset is moderately imbalanced. Models trained without correction will be biased toward predicting DR (the majority class). This is addressed via SMOTE oversampling (see §3).
-
 ---
 
 ## Methodology
 
 ### 1. Preprocessing
-
-- Target label encoding: `DR → 1`, `Control → 0`
-- Stratified 80/20 train-test split to preserve class proportions
-  - Training set: **156 samples** (100 DR, 56 Control)
-  - Hold-out test set: **39 samples** (25 DR, 14 Control)
-- `random_state=42` used throughout for full reproducibility
+- Label encoding: `DR → 1`, `Control → 0`
+- Stratified 80/20 train-test split: **156 train / 39 test** samples
+- `random_state = 42` throughout for full reproducibility
 
 ### 2. Feature Selection — ANOVA F-Test
+- One-way ANOVA applied to all 9,432 genes, selecting **top 50** most statistically discriminative between DR and Control
+- Selector fitted on training data only — applied to test data to prevent data leakage
+- **99.5% dimensionality reduction** (9,432 → 50 genes)
 
-With 9,432 gene features and only 195 samples, direct model training would be severely underdetermined. We applied **Analysis of Variance (ANOVA F-test)** via scikit-learn's `SelectKBest` to rank genes by their statistical discriminability between classes.
+**Top 10 ANOVA-selected genes:**
 
-- **Method:** One-way ANOVA F-test between DR and Control groups for each gene
-- **Selection:** Top **k = 50** genes retained
-- **Fit:** Selector fitted only on training data, then applied to test data to prevent data leakage
-
-This reduces the feature space from 9,432 to 50 — a **99.5% reduction** — while retaining the most biologically relevant signal.
-
-**Top 10 genes selected by ANOVA F-score:**
-
-| Rank | Gene | Biological Relevance |
+| Rank | Gene | Biological Role |
 |---|---|---|
-| 1 | NEK6 | Serine/threonine kinase involved in mitotic regulation |
-| 2 | KCNE3 | Potassium channel subunit; linked to ion transport dysregulation |
-| 3 | RNPEPL1 | Aminopeptidase; implicated in protein processing |
-| 4 | PLXNB2 | Plexin receptor; involved in vascular development and angiogenesis |
-| 5 | MSRB1 | Methionine sulfoxide reductase; oxidative stress response |
-| 6 | Y_RNA | Non-coding RNA; roles in DNA replication and stress response |
-| 7 | DUSP1 | Dual specificity phosphatase; key regulator of MAPK pathway |
+| 1 | NEK6 | Serine/threonine kinase; mitotic regulation |
+| 2 | KCNE3 | Potassium channel subunit; ion transport |
+| 3 | RNPEPL1 | Aminopeptidase; protein processing |
+| 4 | PLXNB2 | Plexin receptor; vascular development & angiogenesis |
+| 5 | MSRB1 | Methionine sulfoxide reductase; oxidative stress |
+| 6 | Y_RNA | Non-coding RNA; DNA replication & stress response |
+| 7 | DUSP1 | Dual specificity phosphatase; MAPK pathway regulator |
 | 8 | PRAM1 | PML-RARA regulated adaptor molecule |
-| 9 | STEAP4 | Metalloreductase; linked to inflammation and insulin signaling |
-| 10 | EGR1 | Early growth response transcription factor; angiogenesis and hypoxia |
+| 9 | STEAP4 | Metalloreductase; inflammation & insulin signaling |
+| 10 | EGR1 | Transcription factor; angiogenesis & hypoxia response |
 
-### 3. Class Imbalance Handling — SMOTE
+### 3. Class Imbalance — SMOTE
+SMOTE (Synthetic Minority Oversampling Technique) was applied to the training set to correct the 1.79:1 class imbalance, producing **200 balanced samples** (100 DR, 100 Control). Applied strictly to training data; the test set remains untouched real patient data.
 
-The original training set has 100 DR and 56 Control samples. Without correction, models overfit to the majority class. We applied **Synthetic Minority Oversampling Technique (SMOTE)**:
+### 4. Models Evaluated
 
-- Generates synthetic Control samples by interpolating between real minority-class samples in the 50-gene feature space
-- Result: **200 balanced training samples** (100 DR, 100 Control)
-- SMOTE applied **after** feature selection and **only to training data** — the test set remains untouched real patient data
+| # | Model | Type | Train Set | Key Configuration |
+|---|---|---|---|---|
+| 1 | Logistic Regression | Linear | Original | `class_weight='balanced'` |
+| 2 | Random Forest | Ensemble (Bagging) | Original | `n_estimators=300` |
+| 3 | XGBoost (baseline) | Gradient Boosting | Original | `n_estimators=300, lr=0.05` |
+| 4 | AdaBoost | Ensemble (Boosting) | SMOTE | `n_estimators=200, lr=0.5` |
+| 5 | SVM (RBF kernel) | Kernel method | SMOTE | `C=10, gamma='scale'` |
+| 6 | LightGBM | Gradient Boosting | SMOTE | `n_estimators=500, lr=0.05` |
+| 7 | CatBoost | Gradient Boosting | SMOTE | `iterations=500, depth=6` |
+| 8 | XGBoost (Optuna) | Gradient Boosting | SMOTE | 50-trial Bayesian search |
+| 9 | LightGBM (Optuna) | Gradient Boosting | SMOTE | 50-trial Bayesian search |
+| 10 | Stacking Ensemble | Meta-learner | SMOTE | SVM + LightGBM(O) + XGB(O) → LR |
 
-### 4. Baseline Models
+All models evaluated with **5-fold stratified cross-validation** on training data and final metrics on the **held-out 20% test set**.
 
-Three classifiers trained on the ANOVA-selected 50 genes (no SMOTE at baseline):
+### 5. Metrics Definition
 
-| Model | Configuration |
-|---|---|
-| Logistic Regression | `max_iter=2000`, `class_weight='balanced'` |
-| Random Forest | `n_estimators=300`, `class_weight='balanced'` |
-| XGBoost | `n_estimators=300`, `learning_rate=0.05`, `max_depth=6` |
+| Metric | Formula | Clinical Meaning |
+|---|---|---|
+| **Accuracy** | (TP + TN) / Total | Overall correct predictions |
+| **Sensitivity** | TP / (TP + FN) | % of true DR cases correctly detected |
+| **Specificity** | TN / (TN + FP) | % of true Controls correctly identified |
+| **PPV** | TP / (TP + FP) | When model predicts DR, how often it's correct |
+| **NPV** | TN / (TN + FN) | When model predicts Control, how often it's correct |
+| **FPR** | FP / (FP + TN) | Rate of healthy patients wrongly flagged as DR |
+| **F1 Score** | 2 × (PPV × Sens) / (PPV + Sens) | Harmonic mean of PPV and Sensitivity |
+| **AUC** | Area under ROC curve | Overall discrimination ability (1.0 = perfect) |
 
-Evaluated with **5-fold stratified cross-validation** on the training set, then final evaluation on the hold-out test set.
-
-### 5. Advanced Models
-
-Four advanced approaches trained on the SMOTE-balanced training set:
-
-#### SVM with RBF Kernel
-Support Vector Machines with a Radial Basis Function (RBF) kernel are theoretically well-suited to high-dimensional, small-sample problems like gene expression classification. The RBF kernel projects data into a higher-dimensional space where linear separation becomes feasible. A `StandardScaler` is applied within a `Pipeline` to normalize features before the SVM, as SVMs are sensitive to feature scale.
-- Configuration: `C=10`, `gamma='scale'`, `class_weight='balanced'`
-
-#### CatBoost
-CatBoost is a gradient boosting algorithm developed by Yandex that uses ordered boosting to reduce overfitting. It natively handles class imbalance via `auto_class_weights='Balanced'` and typically requires less hyperparameter tuning than XGBoost.
-- Configuration: `iterations=500`, `learning_rate=0.05`, `depth=6`
-
-#### Optuna-Tuned XGBoost (Bayesian Hyperparameter Optimization)
-Rather than using default XGBoost parameters, we used **Optuna** — a framework for automated hyperparameter optimization using Tree-structured Parzen Estimators (TPE), a form of Bayesian optimization. Over **50 trials**, Optuna searched the following hyperparameter space:
-
-| Parameter | Search Range |
-|---|---|
-| `n_estimators` | 100 – 600 |
-| `max_depth` | 3 – 10 |
-| `learning_rate` | 0.01 – 0.30 (log scale) |
-| `subsample` | 0.5 – 1.0 |
-| `colsample_bytree` | 0.5 – 1.0 |
-| `min_child_weight` | 1 – 10 |
-
-**Best parameters found:**
-```
-n_estimators: 209
-max_depth: 10
-learning_rate: 0.01263
-subsample: 0.914
-colsample_bytree: 0.514
-min_child_weight: 1
-```
-
-#### Stacking Ensemble
-A stacking (stacked generalization) ensemble combines the predictions of SVM, CatBoost, and the Optuna-tuned XGBoost as base learners, feeding their outputs into a **Logistic Regression meta-learner** which learns how to best combine them. This approach exploits the complementary strengths of each model.
+*(DR = positive class, Control = negative class)*
 
 ---
 
 ## Results
 
-### Baseline Model Results
+### Full Metrics Table — All 10 Models
 
-| Model | CV Accuracy (5-Fold) | Test Accuracy |
-|---|---|---|
-| Logistic Regression | 51.94% ± 7.52% | 64.10% |
-| Random Forest | 76.25% ± 7.87% | 82.05% |
-| **XGBoost** | **72.38% ± 7.66%** | **84.62%** |
+| Model | CV Acc | Acc | Sens | Spec | PPV | NPV | FPR | F1 | AUC |
+|---|---|---|---|---|---|---|---|---|---|
+| Logistic Regression | 0.519 | 0.641 | 0.600 | 0.714 | 0.789 | 0.500 | 0.286 | 0.682 | 0.723 |
+| Random Forest | 0.762 | 0.821 | **0.840** | 0.786 | 0.875 | 0.733 | 0.214 | 0.857 | 0.867 |
+| XGBoost (baseline) | 0.724 | **0.846** | 0.800 | **0.929** | **0.952** | 0.722 | **0.071** | **0.870** | 0.854 |
+| AdaBoost | 0.825 | 0.795 | 0.760 | 0.857 | 0.905 | 0.667 | 0.143 | 0.826 | **0.883** |
+| SVM (RBF) | 0.770 | 0.718 | 0.640 | 0.857 | 0.889 | 0.571 | 0.143 | 0.744 | 0.854 |
+| LightGBM | 0.810 | **0.846** | 0.800 | **0.929** | **0.952** | 0.722 | **0.071** | **0.870** | 0.874 |
+| CatBoost | 0.830 | 0.821 | 0.800 | 0.857 | 0.909 | 0.706 | 0.143 | 0.851 | 0.869 |
+| XGBoost (Optuna) | **0.865** | 0.821 | 0.760 | **0.929** | 0.950 | 0.684 | **0.071** | 0.844 | 0.851 |
+| LightGBM (Optuna) | 0.835 | 0.795 | 0.760 | 0.857 | 0.905 | 0.667 | 0.143 | 0.826 | 0.857 |
+| Stacking Ensemble | 0.815 | 0.795 | 0.800 | 0.786 | 0.870 | 0.688 | 0.214 | 0.833 | 0.874 |
 
-### Advanced Model Results
+**Bold** = best value in that column.
 
-| Model | CV Accuracy (5-Fold) | Test Accuracy |
-|---|---|---|
-| SVM (RBF kernel) | 77.00% ± 3.67% | 71.79% |
-| CatBoost | 83.00% ± 5.34% | 82.05% |
-| XGBoost + Optuna | **87.00%** ± 0.00% | 79.49% |
-| Stacking Ensemble | 84.50% ± 5.10% | 79.49% |
+#### Key highlights
+- **Best Test Accuracy (84.62%):** XGBoost (baseline) and LightGBM — tied
+- **Best AUC (0.883):** AdaBoost — strongest overall discrimination
+- **Best Sensitivity (0.840):** Random Forest — detects the most true DR cases
+- **Best Specificity (0.929):** XGBoost (baseline), LightGBM, XGBoost (Optuna) — fewest false alarms
+- **Best PPV (0.952):** XGBoost (baseline) and LightGBM — most reliable positive predictions
+- **Best CV Accuracy (86.50%):** XGBoost (Optuna) — strongest generalization across folds
+- **Lowest FPR (0.071):** XGBoost (baseline), LightGBM, XGBoost (Optuna) — fewest healthy patients wrongly flagged
 
-### Full Model Comparison
+### ROC Curves
+![ROC Curves](roc_curves.png)
 
-| Model | Test Accuracy | Notes |
-|---|---|---|
-| Logistic Regression (baseline) | 64.10% | Linear model, struggles with non-linear gene interactions |
-| Random Forest (baseline) | 82.05% | Strong ensemble, good out-of-the-box |
-| **XGBoost (baseline)** | **84.62%** | **Best on hold-out test** |
-| SVM RBF | 71.79% | Strong CV but sensitive to this test split |
-| CatBoost | 82.05% | Matches RF; highest CV generalization among baselines |
-| XGBoost (Optuna) | 79.49% | Highest CV (87%); slight overfit to training |
-| Stacking Ensemble | 79.49% | Best balance; strong CV (84.5%) |
+ROC curves plot Sensitivity (True Positive Rate) against FPR (False Positive Rate) at all classification thresholds. A curve closer to the top-left corner indicates better performance. All models significantly outperform the random classifier diagonal. **AdaBoost** achieves the highest AUC (0.883), meaning it has the best overall discrimination ability regardless of threshold choice — an important property for a clinical screening tool where the threshold can be adjusted based on desired sensitivity/specificity trade-off.
 
+### Metrics Heatmap
+![Metrics Heatmap](metrics_heatmap.png)
+
+Color-coded performance across all metrics and models. Darker green = higher score. This allows rapid visual comparison of where each model excels and where it falls short. Note that no single model dominates all metrics simultaneously — the optimal choice depends on clinical priorities (e.g., maximizing sensitivity vs. minimizing FPR).
+
+### Model Comparison — Accuracy & AUC
 ![Model Comparison](model_comparison.png)
-
-### Per-Class Performance — Advanced Models
-
-The classification report below provides precision, recall, and F1-score per class, which is more informative than accuracy for imbalanced medical datasets.
-
-#### SVM (RBF)
-| Class | Precision | Recall | F1-Score | Support |
-|---|---|---|---|---|
-| Control | 0.57 | 0.86 | 0.69 | 14 |
-| DR | 0.89 | 0.64 | 0.74 | 25 |
-| **Accuracy** | | | **0.72** | **39** |
-
-#### CatBoost
-| Class | Precision | Recall | F1-Score | Support |
-|---|---|---|---|---|
-| Control | 0.71 | 0.86 | 0.77 | 14 |
-| DR | 0.91 | 0.80 | 0.85 | 25 |
-| **Accuracy** | | | **0.82** | **39** |
-
-#### XGBoost (Optuna-tuned)
-| Class | Precision | Recall | F1-Score | Support |
-|---|---|---|---|---|
-| Control | 0.67 | 0.86 | 0.75 | 14 |
-| DR | 0.90 | 0.76 | 0.83 | 25 |
-| **Accuracy** | | | **0.79** | **39** |
-
-#### Stacking Ensemble
-| Class | Precision | Recall | F1-Score | Support |
-|---|---|---|---|---|
-| Control | 0.69 | 0.79 | 0.73 | 14 |
-| DR | 0.87 | 0.80 | 0.83 | 25 |
-| **Accuracy** | | | **0.79** | **39** |
-
-> **Clinical note:** In a diagnostic context, **DR recall (sensitivity)** is arguably more important than overall accuracy — a missed DR case (false negative) is more harmful than a false alarm. CatBoost achieves the best DR recall (0.80) among advanced models while maintaining high DR precision (0.91).
 
 ---
 
 ## Candidate Biomarker Genes
 
-### ANOVA-Selected Top Genes (most statistically discriminative)
-These genes showed the greatest mean expression difference between DR and Control groups, ranked by ANOVA F-score:
+### Top 5 — XGBoost (Optuna) Feature Importance
 
-`NEK6` · `KCNE3` · `RNPEPL1` · `PLXNB2` · `MSRB1` · `Y_RNA` · `DUSP1` · `PRAM1` · `STEAP4` · `EGR1`
+These genes contributed most to XGBoost classification decisions. Feature importance measures the average gain a gene provides across all decision trees — capturing predictive contribution within a non-linear model, beyond simple statistical difference.
 
-### XGBoost Feature Importance — Top 5 Candidate Biomarkers
-These genes were identified by the trained XGBoost model as the most influential features for classification. Unlike ANOVA which only measures statistical difference, feature importance captures a gene's actual predictive contribution within a non-linear model:
-
-| Rank | Gene | XGBoost Importance Score | Notes |
+| Rank | Gene | Importance | Biological Relevance |
 |---|---|---|---|
-| 1 | **PIEZO1** | 0.0952 | Mechanosensitive ion channel; linked to red blood cell dehydration and vascular integrity |
-| 2 | **HIF1A-AS3** | 0.0632 | Antisense RNA for HIF-1α; regulates hypoxia response, highly relevant to retinal ischemia |
-| 3 | **PLXNB2** | 0.0488 | Plexin-B2; involved in vascular remodeling and angiogenesis — core DR pathology |
-| 4 | **RPS2P5** | 0.0337 | Ribosomal protein pseudogene; emerging roles in cellular stress regulation |
-| 5 | **RNF144B** | 0.0337 | E3 ubiquitin ligase; involved in DNA damage response and apoptosis |
+| 1 | **HIF1A-AS3** | 0.0552 | Antisense RNA for HIF-1α; master regulator of hypoxia response and retinal neovascularization — a core mechanism of advanced DR |
+| 2 | **PIEZO1** | 0.0491 | Mechanosensitive ion channel; linked to red blood cell dehydration, vascular integrity, and diabetic vascular complications |
+| 3 | **RNF144B** | 0.0430 | E3 ubiquitin ligase; involved in DNA damage response and apoptosis — relevant to retinal cell death in DR |
+| 4 | **CBL** | 0.0408 | E3 ubiquitin ligase; negative regulator of receptor tyrosine kinase signaling, including VEGF pathway central to retinal angiogenesis |
+| 5 | **IRAK3** | 0.0320 | IL-1 receptor-associated kinase 3; modulates inflammatory signaling — chronic inflammation is a hallmark of DR progression |
+
+### ANOVA Top Genes (also present in XGBoost importance)
+- **PLXNB2** — appeared in both ANOVA top-10 and XGBoost importance rankings, making it a strong converging candidate for further validation
 
 ![Feature Importances](feature_importance.png)
 
-**Key biological observations:**
-- `HIF1A-AS3` regulates the hypoxia-inducible factor pathway, which is directly implicated in the retinal neovascularization seen in advanced DR
-- `PLXNB2` appeared in both ANOVA and XGBoost rankings, making it a strong converging candidate
-- `PIEZO1` mutations are associated with hereditary xerocytosis and have been linked to vascular complications in diabetes
-- `DUSP1` (ANOVA-selected) is a known regulator of the MAPK/ERK signaling pathway, which drives DR-related inflammatory cascades
-
-These genes warrant further validation through qPCR, protein-level studies, and pathway enrichment analysis.
+**Biological interpretation:**
+- `HIF1A-AS3` regulates the hypoxia-inducible factor (HIF-1α) pathway, which directly drives the retinal neovascularization seen in proliferative DR. Its top ranking is biologically coherent.
+- `CBL`-mediated suppression of VEGF signaling is directly relevant — VEGF (vascular endothelial growth factor) is the primary therapeutic target in current anti-DR treatments (anti-VEGF injections).
+- `IRAK3` links to the NF-κB inflammatory cascade, which is increasingly recognized as central to early DR pathogenesis.
+- These genes warrant validation via qPCR, Western blotting, and pathway enrichment analysis (GSEA/KEGG).
 
 ---
 
 ## Visualizations
 
-### PCA Plot — DR vs Control
+### PCA Plot
 ![PCA Plot](pca_plot.png)
 
-Principal Component Analysis was applied to the 50 ANOVA-selected genes (after StandardScaler normalization) to project training samples into 2 dimensions. The degree of cluster separation between DR (red) and Control (blue) in this 2D space reflects how well the selected genes encode disease status. Partial but visible separation confirms the biological signal in the feature set — full separation is not expected with only 2 components from a 50-dimensional space.
+Dimensionality reduction of the 50 ANOVA-selected genes to 2 principal components. Partial but visible cluster separation between DR (red) and Control (blue) confirms that the selected gene features carry meaningful biological signal separating the two classes.
 
 ### Gene Expression Heatmap — Top 15 Genes
 ![Heatmap](heatmap.png)
 
-Expression levels of the top 15 ANOVA-ranked genes across all 156 training samples, sorted by class label. Rows are genes; columns are patients. The `RdBu_r` colormap shows relative expression: **red = high expression**, **blue = low expression**. Visible horizontal banding (consistent red or blue across a group of samples) indicates a gene is differentially expressed between DR and Control — exactly the signature expected from a diagnostic biomarker.
-
-### XGBoost Feature Importance — Top 15 Genes
-![Feature Importances](feature_importance.png)
-
-Horizontal bar chart of the 15 genes contributing most to XGBoost classification decisions, ranked by the model's internal `feature_importances_` (computed from the average gain across all trees where each feature was used as a split). The top gene (`PIEZO1`) accounts for ~9.5% of total model importance — a notably high share in a 50-feature space.
-
-### Model Comparison — All 7 Classifiers
-![Model Comparison](model_comparison.png)
-
-Hold-out test accuracy for all seven classifiers benchmarked in this study. The dashed line marks the baseline XGBoost at 84.62%. Grey bars are baseline models; colored bars are advanced models. Note that CV accuracy (not shown here) favors the advanced models — the gap between CV and test performance reflects variance from the small test set (n=39).
+Expression levels of the top 15 ANOVA-ranked genes across 156 training samples (sorted by class). **Red = high expression, Blue = low expression.** Visible horizontal banding across patient groups indicates consistent differential expression — the hallmark signature of a diagnostic biomarker.
 
 ---
 
 ## Discussion
 
-### Why the baseline XGBoost held the top spot on the test set
+### Model selection for clinical use
+In a DR screening context, **sensitivity (recall for DR)** is the most critical metric — a missed DR case (false negative) can lead to untreated disease progression and vision loss. Against this priority:
+- **Random Forest** achieves the best sensitivity (0.840)
+- **AdaBoost** achieves the best AUC (0.883), meaning it offers the most flexibility to trade off sensitivity vs. specificity by adjusting the decision threshold
+- **XGBoost (baseline) and LightGBM** offer the best balance: highest accuracy (84.62%), best specificity (0.929), and lowest FPR (0.071) — minimizing unnecessary referrals in a screening setting
 
-The hold-out test set contains only **39 samples**. At this scale, a single misclassification changes accuracy by 2.56 percentage points — making it highly sensitive to random variance in the specific split. The advanced models actually show superior **cross-validation accuracy** (CatBoost: 83%, Optuna XGBoost: 87%, Stacking: 84.5%), which is a more reliable measure of generalization across the full training distribution.
+### Why Optuna-tuned models didn't dominate the test set
+With only 39 test samples, a single misclassification changes accuracy by 2.56 percentage points. Extensive hyperparameter tuning on the training distribution can overfit to it, causing slightly lower test performance than CV suggests. **Optuna XGBoost achieved the best CV accuracy (86.50%)** — a more robust estimate of generalization. Nested cross-validation would give an even more unbiased evaluation.
 
-This is a known problem in small-sample biomedical machine learning studies — test set results should be interpreted alongside CV results, and ideally validated on an independent external cohort.
-
-### On the gap between CV and test accuracy for Optuna XGBoost
-
-The Optuna-tuned model achieved 87% CV accuracy but only 79.49% on the test set. This suggests some degree of **overfitting to the training distribution** during hyperparameter optimization — a common pitfall of extensive tuning on small datasets. Nested cross-validation (using an outer loop for evaluation and inner loop for tuning) would give a less optimistic and more unbiased estimate.
-
-### Class imbalance and clinical relevance
-
-In clinical screening, **sensitivity (recall for DR)** matters more than overall accuracy: a patient with DR who is classified as Control (false negative) may go untreated and lose vision. The best DR recall across all models was **0.86** (SVM RBF and Optuna XGBoost, for Control class), while CatBoost achieved **0.80 DR recall** with **0.91 DR precision** — a favorable balance for screening applications.
+### LightGBM as a strong baseline-level model
+LightGBM (with default tuning) matched XGBoost baseline exactly (84.62% accuracy, identical Specificity/PPV/FPR). Given its faster training speed and strong performance, it is a compelling alternative for larger datasets.
 
 ### Limitations
-
-1. **Small sample size (n=195):** Limits statistical power and model generalizability. Results should be validated on a larger, independent cohort.
-2. **Single train-test split:** A single 80/20 split introduces variance. Repeated k-fold or leave-one-out CV would provide more stable estimates.
-3. **No external validation:** All results are on held-out splits of the same dataset. Performance on data from different hospitals or sequencing platforms is unknown.
-4. **ANOVA feature selection:** ANOVA tests marginal effects of each gene independently — it does not capture gene-gene interactions. Methods like LASSO or recursive feature elimination with the final model may identify a different and potentially better gene subset.
-5. **SMOTE on gene expression:** Synthetic samples generated by SMOTE may not faithfully represent biological gene co-expression patterns, potentially introducing artifacts.
+1. **Small sample size (n=195):** Limits statistical power. External validation on an independent cohort is needed.
+2. **Single train-test split:** A single 80/20 split introduces variance. Results should be confirmed with repeated stratified k-fold CV.
+3. **SMOTE artifacts:** Synthetic oversampling may not fully preserve real gene co-expression relationships.
+4. **ANOVA limitation:** Tests each gene independently — does not capture gene-gene interaction effects.
+5. **No pathway-level analysis:** Gene importance scores should be followed up with GSEA or KEGG pathway enrichment to confirm biological plausibility.
 
 ---
 
 ## Reproducibility
 
-All results are fully reproducible. The complete pipeline is implemented in `run_analysis.py`.
-
 ```bash
-# Install dependencies
-pip install pandas numpy scikit-learn xgboost catboost imbalanced-learn optuna matplotlib seaborn
+pip install pandas numpy scikit-learn xgboost catboost lightgbm imbalanced-learn optuna matplotlib seaborn
 
-# Place FINAL_COMBINED_DATASET.csv in the project directory, then:
 python3 run_analysis.py
 ```
 
-**Output:**
-- Console: all accuracy scores, CV results, classification reports, top biomarker genes
-- `pca_plot.png` — PCA visualization
-- `heatmap.png` — gene expression heatmap
-- `feature_importance.png` — XGBoost feature importances
-- `model_comparison.png` — full model comparison chart
-
-| Seed | Value |
+| Setting | Value |
 |---|---|
-| `random_state` | 42 (all sklearn models) |
-| `random_seed` | 42 (CatBoost) |
-| Optuna trials | 50 |
-| CV folds | 5 (StratifiedKFold) |
+| `random_state` | 42 (all models) |
+| CV strategy | 5-fold StratifiedKFold |
 | Train/test split | 80% / 20% stratified |
+| Optuna trials | 50 per model |
+| Feature selection | ANOVA F-test, k=50 |
+| Imbalance correction | SMOTE (training only) |
+
+**Output files:** `roc_curves.png`, `metrics_heatmap.png`, `model_comparison.png`, `pca_plot.png`, `heatmap.png`, `feature_importance.png`
 
 ---
 
@@ -334,15 +242,17 @@ python3 run_analysis.py
 
 ```
 Biomarkers_Diabetes/
-├── run_analysis.py              # Full pipeline: baseline + advanced models
-├── Biomarkers_test_2.ipynb      # Original Colab notebook
-├── FINAL_COMBINED_DATASET.csv   # Dataset (gitignored — not pushed to GitHub)
-├── pca_plot.png                 # PCA visualization
+├── run_analysis.py              # Full pipeline — all 10 models, all metrics
+├── Biomarkers_test_2.ipynb      # Original Colab notebook (exploratory)
+├── FINAL_COMBINED_DATASET.csv   # Dataset (gitignored — not on GitHub)
+├── roc_curves.png               # ROC curves for all 10 models
+├── metrics_heatmap.png          # Heatmap of all metrics across all models
+├── model_comparison.png         # Accuracy & AUC bar charts
+├── pca_plot.png                 # PCA — DR vs Control
 ├── heatmap.png                  # Gene expression heatmap (top 15 genes)
 ├── feature_importance.png       # XGBoost feature importances (top 15 genes)
-├── model_comparison.png         # All 7 models comparison chart
-├── .gitignore                   # Excludes dataset and system files
-└── README.md                    # This file
+├── .gitignore
+└── README.md
 ```
 
 ---
@@ -350,13 +260,9 @@ Biomarkers_Diabetes/
 ## Requirements
 
 ```
-pandas >= 1.3
-numpy >= 1.21
-scikit-learn >= 1.0
-xgboost >= 1.6
-catboost >= 1.0
-imbalanced-learn >= 0.9
-optuna >= 3.0
-matplotlib >= 3.4
-seaborn >= 0.11
+pandas >= 1.3        numpy >= 1.21
+scikit-learn >= 1.0  xgboost >= 1.6
+catboost >= 1.0      lightgbm >= 3.3
+imbalanced-learn >= 0.9  optuna >= 3.0
+matplotlib >= 3.4    seaborn >= 0.11
 ```
